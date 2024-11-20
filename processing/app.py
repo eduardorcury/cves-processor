@@ -1,6 +1,7 @@
 import json
 import boto3
 import pandas as pd
+from datetime import datetime
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 
@@ -19,16 +20,14 @@ def lambda_handler(event, context):
             df = process_file(json.load(s3_object["Body"]))
             if df is not None:
                 dfs.append(df)
+                result = pd.concat(dfs)
+                save_to_database(result)
         except NoCredentialsError:
             print("Error: AWS credentials not found.")
         except PartialCredentialsError:
             print("Error: Incomplete AWS credentials provided.")
         except Exception as e:
             print(f"Error processing file {key} from S3: {e}")
-
-    result = pd.concat(dfs)
-    save_to_database(result)
-    print(result.head())
 
     return {
         "statusCode": 200,
@@ -57,11 +56,14 @@ def process_file(data):
     if cve_state.iloc[0] == "REJECTED":
         return None
 
-    df = pd.DataFrame(columns=["cve_id", "state", "assigner", "affected_products", "affected_vendors",
-                               "description", "cvss_score", "cvss_severity", "cwe_id", "cwe_description"])
+    df = pd.DataFrame(columns=["cve_id", "state", "date_published", "date_updated", "assigner",
+                               "affected_products", "affected_vendors","description", "cvss_score",
+                               "cvss_severity", "cwe_id", "cwe_description"])
 
     df["cve_id"] = cve_df["cveMetadata.cveId"]
     df["state"] = cve_df["cveMetadata.state"]
+    df["date_published"] = cve_df["cveMetadata.datePublished"]
+    df["date_updated"] = cve_df["cveMetadata.dateUpdated"]
     df["assigner"] = cve_df["cveMetadata.assignerShortName"]
 
     affected_products = []
@@ -97,23 +99,35 @@ def save_to_database(df):
 
     for index, row in df.iterrows():
         try:
+            row = row.where(pd.notna(row), "")
             response = table.put_item(
                 Item={
-                    'cve_id': row['cve_id'],
+                    'cve_id': index,
                     'state': row['state'],
+                    'date_published': format_date(row['date_published']),
+                    'date_updated': format_date(row['date_updated']),
                     'assigner': row['assigner'],
                     'affected_products': row['affected_products'],
                     'affected_vendors': row['affected_vendors'],
                     'description': row['description'],
-                    'cvss_score': row['cvss_score'],
-                    'cvss_severity': df['cvss_severity'],
-                    'cwe_id': df['cwe_id'],
-                    'cwe_description': df['cwe_description']
+                    'cvss_score': str(row['cvss_score']),
+                    'cvss_severity': row['cvss_severity'],
+                    'cwe_id': row['cwe_id'],
+                    'cwe_description': row['cwe_description']
                 }
             )
+            print(response)
         except ClientError as e:
             print(f"Insert failed for {row['id']}: {e.response['Error']['Message']}")
+        except Exception as e:
+            print(f"Error saving to Dynamo: {e}")
 
+def format_date(date):
+    try:
+        dt = datetime.fromisoformat(date.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d")
+    except Exception as e:
+        print(f"Error formatting date: {e}")
 
 if __name__ == '__main__':
     with open('../events/event.json', 'r') as f:
