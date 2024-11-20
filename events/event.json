@@ -27,7 +27,7 @@
           "arn": "arn:aws:s3:::cves-source-data"
         },
         "object": {
-          "key": "CVE-2000-1001.json",
+          "key": "CVE-2023-28235.json",
           "size": 1024,
           "eTag": "0123456789abcdef0123456789abcdef",
           "sequencer": "0A1B2C3D4E5F678901"
