@@ -1,11 +1,10 @@
 import json
 import boto3
 import pandas as pd
-from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 
 def lambda_handler(event, context):
-
     s3 = boto3.client('s3')
     dfs = []
 
@@ -28,6 +27,7 @@ def lambda_handler(event, context):
             print(f"Error processing file {key} from S3: {e}")
 
     result = pd.concat(dfs)
+    save_to_database(result)
     print(result.head())
 
     return {
@@ -36,6 +36,7 @@ def lambda_handler(event, context):
             "message": "ok"
         }),
     }
+
 
 def extract_problem_data(problems):
     ids = []
@@ -47,8 +48,8 @@ def extract_problem_data(problems):
                 descriptions.append(description["description"])
     return ids, descriptions
 
-def process_file(data):
 
+def process_file(data):
     cve_df = pd.json_normalize(data)
 
     cve_state = cve_df["cveMetadata.state"]
@@ -88,6 +89,31 @@ def process_file(data):
 
     df.set_index("cve_id", inplace=True)
     return df
+
+
+def save_to_database(df):
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table('cves-db')
+
+    for index, row in df.iterrows():
+        try:
+            response = table.put_item(
+                Item={
+                    'cve_id': row['cve_id'],
+                    'state': row['state'],
+                    'assigner': row['assigner'],
+                    'affected_products': row['affected_products'],
+                    'affected_vendors': row['affected_vendors'],
+                    'description': row['description'],
+                    'cvss_score': row['cvss_score'],
+                    'cvss_severity': df['cvss_severity'],
+                    'cwe_id': df['cwe_id'],
+                    'cwe_description': df['cwe_description']
+                }
+            )
+        except ClientError as e:
+            print(f"Insert failed for {row['id']}: {e.response['Error']['Message']}")
+
 
 if __name__ == '__main__':
     with open('../events/event.json', 'r') as f:

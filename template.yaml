@@ -31,13 +31,29 @@ Resources:
               Ref: CvesBucket
             Events: s3:ObjectCreated:*
     Connectors:
-      Connector:
+      BucketConnector:
         Properties:
           Destination:
             Id: CvesBucket
           Permissions:
             - Read
+      DynamoConnector:
+        Properties:
+          Destination:
+            Id: CvesTable
+          Permissions:
+            - Write
   CvesBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: cves-source-data
+  CvesTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: cves-db
+      PrimaryKey:
+        Name: cve_id
+        Type: String
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
